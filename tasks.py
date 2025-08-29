@@ -25,6 +25,8 @@ async def mic_task(system):
     loop = asyncio.get_running_loop()
     q_raw = queue.Queue()
     is_recording = False
+    noise_floor = config.audio.energy_threshold  # Start with configured threshold
+    noise_samples = []  # Store energy samples for adaptive threshold
     
     def _callback(indata, frames, time_, status):
         """Audio callback function."""
@@ -34,7 +36,7 @@ async def mic_task(system):
         
         # Send silence if playing, thinking or just finished playback
         if (system.state.is_playing or system.state.is_thinking or 
-            current_time - system.state.last_playback_end < 2.0):  # Increased from 1.0 to 2.0 seconds
+            current_time - system.state.last_playback_end < config.audio.post_playback_delay):
             q_raw.put(np.zeros_like(indata[:, 0]))
         else:
             q_raw.put(indata[:, 0].copy())
@@ -56,25 +58,39 @@ async def mic_task(system):
                 
                 # Skip during playback, thinking or just after playback
                 if (system.state.is_playing or system.state.is_thinking or 
-                    current_time - system.state.last_playback_end < 2.0):  # Increased from 1.0 to 2.0 seconds
+                    current_time - system.state.last_playback_end < config.audio.post_playback_delay):
                     continue
                     
                 energy = math.sqrt((frame ** 2).mean()) * 1000
                 
+                # Adaptive noise floor: collect samples when not recording
+                if not is_recording and len(noise_samples) < 50:
+                    noise_samples.append(energy)
+                    if len(noise_samples) == 50:
+                        # Calculate noise floor as 95th percentile of samples + margin
+                        noise_floor = np.percentile(noise_samples, 95) * 1.5
+                        noise_floor = max(noise_floor, config.audio.energy_threshold)
+                        logger.info(f"Adaptive noise floor set to: {noise_floor:.1f}")
+                
+                # Use adaptive threshold
+                current_threshold = noise_floor if len(noise_samples) >= 50 else config.audio.energy_threshold
+                
                 sentence.append(frame)
                 elapsed_ms += config.audio.frame_ms
                 
-                # Update recording state
-                if energy >= config.audio.energy_threshold:
+                # Update recording state with adaptive threshold
+                if energy >= current_threshold:
                     if not is_recording:
-                        logger.info("Recording started...")
+                        logger.info(f"Recording started (energy: {energy:.1f}, threshold: {current_threshold:.1f})")
                         is_recording = True
+                        # Reset noise samples when recording starts
+                        noise_samples = []
                     silent_ms = 0
                 else:
                     silent_ms += config.audio.frame_ms
                     if is_recording and silent_ms >= config.audio.silence_ms:
                         is_recording = False
-                        logger.info("Recording ended")
+                        logger.info(f"Recording ended after {silent_ms}ms silence")
 
                 # Process audio when enough silence or max length reached
                 # Only stop if we have significant silence and some speech was recorded

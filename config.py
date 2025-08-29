@@ -25,13 +25,13 @@ class AudioConfig:
     """Audio recording and playback settings."""
     sample_rate: int = 16000
     frame_ms: int = 20
-    energy_threshold: int = 400  # Lowered from 500 to be more sensitive to speech
-    silence_ms: int = 15000  # Increased from 9000ms to 15000ms (15 seconds of silence before stopping)
-    max_sentence_ms: int = 60000  # Increased from 40000ms to 60000ms (60 seconds max recording)
-    min_speech_ms: int = 500
+    energy_threshold: int = 800  # Base threshold for voice detection (will adapt to environment)
+    silence_ms: int = 3000  # 3 seconds of silence before stopping
+    max_sentence_ms: int = 60000  # 60 seconds max recording
+    min_speech_ms: int = 200  # Reduced from 500ms to 200ms for faster detection
     volume_multiplier: float = 2.0
-    post_playback_delay: float = 2.0  # Wait 2 seconds after playback before listening
-    min_pause_between_words: int = 3000  # Allow 3 second pauses between words without stopping
+    post_playback_delay: float = 1.0  # 1 second after playback before listening
+    min_pause_between_words: int = 600  # Reduced from 3000ms to 600ms for natural pauses
     
     def validate(self) -> bool:
         """Validate audio configuration."""
@@ -49,10 +49,10 @@ class AudioConfig:
 @dataclass
 class ModelConfig:
     """Model configuration settings."""
-    max_tokens: int = 512
-    context_length: int = 4096
-    n_threads: int = 4
-    batch_size: int = 512
+    max_tokens: int = 256  # Reduced from 512 for faster responses
+    context_length: int = 2048  # Reduced from 4096 for faster processing
+    n_threads: int = 8  # Increased from 4 to use more CPU threads
+    batch_size: int = 256  # Reduced from 512 for faster processing
     temperature: float = 0.7
     top_p: float = 0.9
     presence_penalty: float = 0.6

@@ -762,7 +762,7 @@ class TTSManager:
                     raise Exception(f"PowerShell synthesis failed: {result.stderr}")
                 
                 # Wait a moment for file to be written
-                time.sleep(0.5)
+                time.sleep(0.1)  # Reduced from 0.5 to 0.1 for faster response
             else:
                 # Use pyttsx3 for Windows and other systems
                 import pyttsx3
