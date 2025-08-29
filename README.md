@@ -1,98 +1,191 @@
-# 语音交互系统
+# HER - Voice Interactive AI Assistant
 
-这是一个基于Python的语音交互系统，能够实现语音识别、处理和响应功能。
+A sophisticated voice-interactive AI assistant inspired by the movie "Her", featuring real-time speech recognition, natural language processing, and text-to-speech capabilities with a warm, engaging personality.
 
-## 项目结构
+## Features
+
+- **Real-time Voice Interaction**: Seamless speech recognition and response generation
+- **Natural Conversations**: Engaging, thoughtful responses with personality
+- **Female Voice Synthesis**: Configured with pleasant female voice output
+- **Conversation Memory**: Maintains context across interactions
+- **Cross-Platform Support**: Works on Windows, macOS, and Linux (including WSL)
+- **Thought Process Display**: Shows AI's reasoning alongside responses
+
+## Project Structure
 
 ```
-project/
-├── main.py              # 主程序入口
-├── voice_system.py      # 语音系统核心实现
-├── config.py            # 配置文件
-├── tasks.py             # 任务处理模块
-├── utils.py             # 工具函数
-├── requirements.txt     # 项目依赖
-├── models/              # 模型文件目录
-└── output/             # 输出文件目录
+her/
+├── main.py              # Main entry point
+├── voice_system.py      # Core voice system implementation
+├── config.py            # Configuration settings
+├── tasks.py             # Task processing modules
+├── utils.py             # Utility functions
+├── requirements.txt     # Python dependencies
+├── models/              # Model files directory
+│   └── llama/          # LLM model directory
+│       └── Qwen3-1.7B-Q6_K.gguf
+└── output/             # Output files directory
 ```
 
-## 技术栈
+## Technology Stack
 
-- Python 3.x
-- numpy: 数值计算库
-- scipy: 科学计算库
-- sounddevice: 音频处理
-- whisper: 语音识别
-- llama-cpp-python: LLM模型支持
-- pyttsx3: 文字转语音
-- python-dotenv: 环境变量管理
+- **Speech Recognition**: OpenAI Whisper (tiny model for fast processing)
+- **Language Model**: Llama.cpp with Qwen3-1.7B model
+- **Text-to-Speech**: pyttsx3 (Windows) / PowerShell (WSL)
+- **Audio Processing**: sounddevice, numpy, scipy
+- **Async Processing**: asyncio for concurrent task handling
 
-## 安装说明
+## Installation
 
-1. 克隆项目到本地：
+### Prerequisites
+
+- Python 3.8 or higher
+- Working microphone and speakers
+- At least 4GB RAM (8GB recommended)
+- ~2GB disk space for models
+
+### Setup Steps
+
+1. **Clone the repository:**
 ```bash
-git clone [项目地址]
-cd project
+git clone https://github.com/yourusername/her.git
+cd her
 ```
 
-2. 安装依赖：
+2. **Install dependencies:**
 ```bash
 pip install -r requirements.txt
 ```
 
-3. 配置环境变量：
-- 创建 `.env` 文件
-- 设置必要的环境变量（详见配置说明）
+3. **Download the language model:**
+   - Download the Qwen3-1.7B-Q6_K.gguf model
+   - Place it in `models/llama/` directory
+   - Or modify `config.py` to point to your model location
 
-## 使用方法
+4. **Configure audio devices (optional):**
+   - The system will auto-detect audio devices
+   - Check console output for selected devices
+   - Modify device selection in `voice_system.py` if needed
 
-1. 运行系统：
+## Usage
+
+### Basic Usage
+
+Run the main application:
 ```bash
 python main.py
 ```
 
-2. 系统将自动：
-- 初始化语音交互系统
-- 进行系统状态检查
-- 测试音频设置
-- 启动语音交互服务
+The system will:
+1. Initialize all components
+2. Test audio output with a tone
+3. Start listening for your voice
+4. Display "Ready to listen..." when ready
 
-## 主要功能
+### Interaction Flow
 
-- 语音识别：将用户语音转换为文本
-- 语音合成：将文本转换为语音输出
-- 任务处理：处理用户的语音指令
-- 系统状态监控：实时监控系统运行状态
+1. **Speak** when you see "Ready to listen..."
+2. **Wait** for the system to process (shows "LLM thinking...")
+3. **Listen** to Her's response
+4. **Continue** the conversation naturally
 
-## 配置说明
+### Commands
 
-系统配置在 `config.py` 中管理，主要包括：
-- 音频设置
-- 模型参数
-- 系统行为配置
-- 输出设置
+- Say "goodbye", "bye", "exit", or "quit" to end the conversation
+- The system saves conversation logs automatically
 
-## 错误处理
+### Testing Components
 
-系统包含完整的错误处理机制：
-- 系统初始化失败处理
-- 运行时错误处理
-- 优雅的退出机制
+Test voice synthesis:
+```bash
+python test_voice.py
+```
 
-## 注意事项
+Test response formatting:
+```bash
+python test_response_format.py
+```
 
-- 确保系统有适当的麦克风权限
-- 检查音频输入/输出设备是否正常工作
-- 确保模型文件已正确下载到 models/ 目录
+## Configuration
 
-## 许可证
+Key settings in `config.py`:
 
-[添加许可证信息]
+### Audio Settings
+- `energy_threshold`: Voice detection sensitivity (default: 400)
+- `silence_ms`: Silence duration before processing (default: 15000ms)
+- `max_sentence_ms`: Maximum recording length (default: 60000ms)
 
-## 贡献指南
+### Model Settings
+- `max_tokens`: Maximum response length (default: 512)
+- `temperature`: Response creativity (0.0-1.0, default: 0.7)
 
-[添加贡献指南]
+### TTS Settings
+- `voice_gender`: Voice type (default: "female")
+- `voice_rate`: Speech speed (default: 180 wpm)
 
-## 联系方式
+## Customization
 
-[添加联系方式] 
+### Personality
+
+Modify the system prompt in `config.py`:
+```python
+content: str = '''You are Her, a friendly and intelligent AI assistant...'''
+```
+
+### Voice Selection
+
+Change preferred voices in `config.py`:
+```python
+preferred_voices: list = ['zira', 'eva', 'hazel', ...]
+```
+
+### Response Style
+
+Adjust generation parameters in `voice_system.py`:
+- Increase `max_tokens` for longer responses
+- Modify `temperature` for creativity level
+- Adjust `presence_penalty` and `frequency_penalty` for variety
+
+## Troubleshooting
+
+### No Audio Output
+- Check audio device selection in console output
+- Ensure speakers/headphones are connected
+- Try running `test_voice.py` to test TTS
+
+### Speech Not Detected
+- Check microphone permissions
+- Adjust `energy_threshold` in config.py
+- Ensure microphone is not muted
+
+### Slow Response Time
+- Consider using a smaller language model
+- Reduce `max_tokens` for shorter responses
+- Check CPU usage and available RAM
+
+### WSL Issues
+- Ensure PowerShell is accessible from WSL
+- Install Windows audio drivers in WSL
+- Use PulseAudio for audio routing
+
+## Contributing
+
+Contributions are welcome! Please:
+1. Fork the repository
+2. Create a feature branch
+3. Make your changes
+4. Submit a pull request
+
+## License
+
+This project is licensed under the MIT License - see the LICENSE file for details.
+
+## Acknowledgments
+
+- Inspired by the movie "Her" directed by Spike Jonze
+- Built with open-source AI models and libraries
+- Thanks to the Whisper, Llama.cpp, and pyttsx3 communities
+
+## Contact
+
+For questions or support, please open an issue on GitHub. 
