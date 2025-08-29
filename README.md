@@ -2,6 +2,8 @@
 
 A sophisticated voice-interactive AI assistant inspired by the movie "Her", featuring real-time speech recognition, natural language processing, and text-to-speech capabilities with a warm, engaging personality.
 
+https://youtu.be/4Lzy3l22QU0
+
 ## Features
 
 - **Real-time Voice Interaction**: Seamless speech recognition and response generation
