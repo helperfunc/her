@@ -34,7 +34,7 @@ async def mic_task(system):
         
         # Send silence if playing, thinking or just finished playback
         if (system.state.is_playing or system.state.is_thinking or 
-            current_time - system.state.last_playback_end < 1.0):
+            current_time - system.state.last_playback_end < 2.0):  # Increased from 1.0 to 2.0 seconds
             q_raw.put(np.zeros_like(indata[:, 0]))
         else:
             q_raw.put(indata[:, 0].copy())
@@ -56,7 +56,7 @@ async def mic_task(system):
                 
                 # Skip during playback, thinking or just after playback
                 if (system.state.is_playing or system.state.is_thinking or 
-                    current_time - system.state.last_playback_end < 1.0):
+                    current_time - system.state.last_playback_end < 2.0):  # Increased from 1.0 to 2.0 seconds
                     continue
                     
                 energy = math.sqrt((frame ** 2).mean()) * 1000
@@ -77,14 +77,28 @@ async def mic_task(system):
                         logger.info("Recording ended")
 
                 # Process audio when enough silence or max length reached
-                if ((silent_ms >= config.audio.silence_ms and 
-                     elapsed_ms > config.audio.min_speech_ms) or 
-                    elapsed_ms >= config.audio.max_sentence_ms):
+                # Only stop if we have significant silence and some speech was recorded
+                should_process = False
+                
+                # Check if we should process based on silence duration
+                if is_recording and silent_ms >= config.audio.min_pause_between_words:
+                    # We've had a pause, but check if it's long enough to stop
+                    if silent_ms >= config.audio.silence_ms and elapsed_ms > config.audio.min_speech_ms:
+                        should_process = True
+                        logger.info(f"Processing after {silent_ms}ms silence, {elapsed_ms}ms total")
+                
+                # Force process if max length reached
+                if elapsed_ms >= config.audio.max_sentence_ms:
+                    should_process = True
+                    logger.info(f"Processing due to max length: {elapsed_ms}ms")
+                
+                if should_process:
                     if len(sentence) > 0:
                         pcm = np.concatenate(sentence, axis=0)
                         if not AudioProcessor.detect_silence(pcm):
                             pcm = pcm.astype(np.float32)
                             await system.q_pcm.put(pcm)
+                            logger.info(f"Sent {len(pcm)/config.audio.sample_rate:.1f}s of audio for processing")
                     sentence, elapsed_ms, silent_ms = [], 0, 0
                     is_recording = False
                     
@@ -123,6 +137,8 @@ async def asr_task(system, executor: ThreadPoolExecutor):
 
 async def llm_tts_task(system, executor: ThreadPoolExecutor):
     """LLM and TTS processing task implementation."""
+    consecutive_failures = 0  # Track consecutive TTS failures
+    
     while True:
         try:
             user_text = await system.q_text.get()
@@ -145,38 +161,58 @@ async def llm_tts_task(system, executor: ThreadPoolExecutor):
                 executor, system.llm_manager.generate_response, system.state.history)
             
             if full_reply:
-                # Extract thought process
+                # Extract thought process and response separately
                 think_match = re.search(r'<think>(.*?)</think>', full_reply, re.DOTALL)
+                response_match = re.search(r'<response>(.*?)</response>', full_reply, re.DOTALL)
+                
+                # Display thought process (text only, no voice)
                 if think_match:
                     think_content = think_match.group(1).strip()
-                    logger.info("\nThought process:")
-                    logger.info("=" * 50)
-                    for line in think_content.split('\n'):
-                        logger.info(line.strip())
-                    logger.info("=" * 50)
+                    print("\n[THOUGHT PROCESS]:")
+                    print("="* 40)
+                    print(think_content)
+                    print("="* 40)
                 
-                # Process response for TTS
+                # Display response text
+                if response_match:
+                    response_content = response_match.group(1).strip()
+                    print("\n[RESPONSE]:")
+                    print(response_content)
+                    print("-"* 40)
+                
+                # Process response for TTS (only the response part, not the thought)
                 logger.info("\nStarting speech synthesis...")
-                result = await asyncio.get_running_loop().run_in_executor(
-                    executor, system.tts_manager.synthesize, full_reply)
-                
-                if result and isinstance(result, tuple) and len(result) == 2:
-                    logger.info("Speech synthesis successful")
-                    data, fs = result
-                    data = AudioProcessor.process_audio_data(data, volume_multiplier=config.audio.volume_multiplier)
+                try:
+                    result = await asyncio.get_running_loop().run_in_executor(
+                        executor, system.tts_manager.synthesize, full_reply)
                     
-                    logger.info("Starting playback...")
-                    system.state.is_playing = True
-                    sd.play(data, fs)
-                    sd.wait()
-                    system.state.is_playing = False
-                    system.state.last_playback_end = time.time()
-                    logger.info("Playback completed")
+                    if result and isinstance(result, tuple) and len(result) == 2:
+                        logger.info("Speech synthesis successful")
+                        data, fs = result
+                        data = AudioProcessor.process_audio_data(data, volume_multiplier=config.audio.volume_multiplier)
+                        
+                        logger.info("Starting playback...")
+                        system.state.is_playing = True
+                        sd.play(data, fs)
+                        sd.wait()
+                        system.state.is_playing = False
+                        system.state.last_playback_end = time.time()
+                        logger.info("Playback completed")
+                        consecutive_failures = 0  # Reset failure counter
+                    else:
+                        consecutive_failures += 1
+                        logger.error(f"Speech synthesis failed (attempt {consecutive_failures}): {result}")
+                        
+                        # If TTS fails multiple times, continue without voice
+                        if consecutive_failures >= 2:
+                            logger.warning("Multiple TTS failures, continuing without voice output")
+                            consecutive_failures = 0
+                except Exception as tts_error:
+                    logger.error(f"TTS Exception: {str(tts_error)}")
+                    consecutive_failures += 1
                     
-                    # Update conversation history
-                    system.state.add_message("assistant", full_reply)
-                else:
-                    logger.error(f"Speech synthesis failed: {result}")
+                # Always update conversation history, even if TTS fails
+                system.state.add_message("assistant", full_reply)
             
             # Resume recording
             system.state.is_thinking = False

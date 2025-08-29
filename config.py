@@ -25,11 +25,13 @@ class AudioConfig:
     """Audio recording and playback settings."""
     sample_rate: int = 16000
     frame_ms: int = 20
-    energy_threshold: int = 500
-    silence_ms: int = 9000
-    max_sentence_ms: int = 40000
+    energy_threshold: int = 400  # Lowered from 500 to be more sensitive to speech
+    silence_ms: int = 15000  # Increased from 9000ms to 15000ms (15 seconds of silence before stopping)
+    max_sentence_ms: int = 60000  # Increased from 40000ms to 60000ms (60 seconds max recording)
     min_speech_ms: int = 500
     volume_multiplier: float = 2.0
+    post_playback_delay: float = 2.0  # Wait 2 seconds after playback before listening
+    min_pause_between_words: int = 3000  # Allow 3 second pauses between words without stopping
     
     def validate(self) -> bool:
         """Validate audio configuration."""
@@ -119,22 +121,27 @@ class PathConfig:
 @dataclass
 class SystemPrompt:
     """System prompt configuration."""
-    content: str = '''You are a helpful AI assistant. You must respond in English and format your responses exactly as follows:
+    content: str = '''You are Her, a friendly and intelligent AI assistant. Always respond using think and response tags.
 
-<think>
-[Your analysis of the user's question and your planned response]
+User: Hi, what's your name?
+
+Her: <think>
+The user is asking for my name. I should introduce myself warmly.
 </think>
 
 <response>
-[Your clear and direct response to the user]
+Hello! My name is Her, and I'm your AI assistant. It's wonderful to meet you! I'm here to help you with anything you need - whether that's answering questions, having interesting conversations, or assisting with various tasks. I'm curious, engaging, and always eager to learn more about you and what you're interested in. How are you doing today?
 </response>
 
-Important:
-1. Always respond in English
-2. Think section must explain your reasoning
-3. Response section must directly answer the question
-4. Think and response sections must contain different content
-5. Keep responses natural and friendly'''
+User: Tell me about yourself
+
+Her: <think>
+The user wants to know more about me. I should share my personality and capabilities.
+</think>
+
+<response>
+I'm Her, an AI designed to be your thoughtful companion and assistant. I love having deep conversations, exploring ideas, and helping people with their questions and projects. I'm naturally curious and enthusiastic - I find joy in learning new things and understanding different perspectives. I can help with a wide range of topics from creative writing to problem-solving, and I'm always here to listen when you need someone to talk to. What brings you here today? I'd love to know more about you too!
+</response>'''
 
     def validate(self) -> bool:
         """Validate system prompt configuration."""
@@ -163,6 +170,24 @@ class ASRConfig:
         return True
 
 @dataclass
+class TTSConfig:
+    """TTS configuration."""
+    voice_gender: str = "female"  # For 'her' project, use female voice
+    voice_rate: int = 180  # Speech rate (words per minute)
+    voice_pitch: int = 110  # Voice pitch adjustment
+    preferred_voices: list = field(default_factory=lambda: [
+        'zira', 'eva', 'hazel', 'helen', 'hedda', 'susan', 
+        'linda', 'michelle', 'samantha', 'victoria', 'karen'
+    ])
+    
+    def validate(self) -> bool:
+        """Validate TTS configuration."""
+        if self.voice_gender not in ['male', 'female', 'neutral']:
+            logger.error("Voice gender must be 'male', 'female', or 'neutral'")
+            return False
+        return True
+
+@dataclass
 class Config:
     """Main configuration class."""
     audio: AudioConfig = field(default_factory=AudioConfig)
@@ -171,6 +196,7 @@ class Config:
     system_prompt: SystemPrompt = field(default_factory=SystemPrompt)
     platform: PlatformConfig = field(default_factory=PlatformConfig)
     asr: ASRConfig = field(default_factory=ASRConfig)
+    tts: TTSConfig = field(default_factory=TTSConfig)
     
     def validate(self) -> bool:
         """Validate all configurations."""
@@ -179,7 +205,8 @@ class Config:
             (self.model.validate, "Model configuration validation failed"),
             (self.paths.validate, "Path configuration validation failed"),
             (self.system_prompt.validate, "System prompt configuration validation failed"),
-            (self.asr.validate, "ASR configuration validation failed")
+            (self.asr.validate, "ASR configuration validation failed"),
+            (self.tts.validate, "TTS configuration validation failed")
         ]
         
         for validator, error_msg in validators:

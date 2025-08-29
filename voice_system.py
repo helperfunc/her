@@ -333,45 +333,40 @@ class LLMManager:
                 if system_message:
                     prompt += f"{system_message}\n\n"
                 
-                # Add conversation history
-                if conversation_history:
-                    prompt += "Previous conversation:\n"
-                    for msg in conversation_history[:-1]:  # Exclude current user message
+                # Add LIMITED conversation history (only last exchange)
+                if len(conversation_history) > 2:
+                    # Only include the last user-assistant exchange
+                    last_exchange = conversation_history[-2:]  # Last 2 messages
+                    prompt += "Previous exchange:\n"
+                    for msg in last_exchange:
                         if msg["role"] == "user":
-                            prompt += f"User: {msg['content']}\n\n"
+                            prompt += f"User: {msg['content']}\n"
                         else:
-                            # For assistant messages, include both think and response parts
-                            think_match = re.search(r'<think>(.*?)</think>', msg['content'], re.DOTALL)
+                            # For assistant messages, only show the response part
                             response_match = re.search(r'<response>(.*?)</response>', msg['content'], re.DOTALL)
-                            
-                            if think_match and response_match:
-                                think = think_match.group(1).strip()
+                            if response_match:
                                 response = response_match.group(1).strip()
-                                prompt += f"Assistant thought: {think}\n"
-                                prompt += f"Assistant response: {response}\n\n"
-                            else:
-                                prompt += f"Assistant: {msg['content']}\n\n"
-                    prompt += "---\n\n"
+                                prompt += f"Assistant: {response}\n"
+                    prompt += "\n"
                 
                 # Add current question
                 if current_user_message:
-                    prompt += f"Current question: {current_user_message}\n\n"
+                    prompt += f"User: {current_user_message}\n\n"
+                    prompt += "Her: "  # Add space after colon
                 else:
                     print("[WARN] No current user message found")
                     continue
-                
-                prompt += "Answer:"
                 
                 print("\n[LLM] Generating response...")
                 
                 completion = self.model.create_completion(
                     prompt=prompt,
-                    max_tokens=config.model.max_tokens,
+                    max_tokens=512,  # Increased to allow for more detailed responses
                     temperature=0.7,
                     top_p=0.9,
                     presence_penalty=0.6,
-                    frequency_penalty=0.7,
-                    stop=["Question:", "\nQuestion", "Current question:", "User:"],
+                    frequency_penalty=0.3,  # Reduced to allow more natural repetition in longer responses
+                    stop=["User:", "\nUser:", "\n\nUser", "</response>\n\nUser"],  # Adjusted stop tokens
                     stream=True
                 )
                 
@@ -389,6 +384,11 @@ class LLMManager:
                         if text:
                             print(text, end="", flush=True)
                             full_reply += text
+                            
+                            # Stop if we have complete response tags
+                            if '</response>' in full_reply:
+                                print("\n[INFO] Complete response detected")
+                                break
                             
                 except Exception as e:
                     print(f"\n[WARN] Generation error: {str(e)}")
@@ -427,58 +427,69 @@ I apologize, but I'm having trouble formulating a proper response right now. Cou
         """Format and clean the response text."""
         print(f"[DEBUG] Formatting response text:\n{text}")
         
-        # Remove any existing malformed tags
-        text = re.sub(r'</think>\s*\[.*?\]', '', text)
-        text = re.sub(r'\[.*?\]', '', text)
+        # First, try to extract content between existing tags if they exist
+        think_match = re.search(r'<think>(.*?)</think>', text, re.DOTALL)
+        response_match = re.search(r'<response>(.*?)</response>', text, re.DOTALL)
         
-        # Split text into sections
-        sections = text.split('\n\n')
-        
-        # Initialize content parts
-        intro_section = None
-        main_content = []
-        conclusion = None
-        
-        # Analyze and categorize sections
-        for section in sections:
-            section = section.strip()
-            if not section:
-                continue
+        if think_match and response_match:
+            # Tags found - extract and clean the content
+            think_content = think_match.group(1).strip()
+            response_content = response_match.group(1).strip()
+            
+            # Remove any format instructions that leaked into content
+            think_content = re.sub(r'\[.*?\]', '', think_content)
+            response_content = re.sub(r'\[.*?\]', '', response_content)
+            think_content = re.sub(r'\(.*?NOT visible.*?\)', '', think_content, flags=re.IGNORECASE)
+            response_content = re.sub(r'\(.*?actual.*?response.*?\)', '', response_content, flags=re.IGNORECASE)
+            
+            # Clean up any duplicated format instructions
+            format_patterns = [
+                r'Thoughtful analysis.*?implications',
+                r'Comprehensive and detailed.*?question',
+                r'Your internal reasoning.*?user',
+                r'Your actual.*?response'
+            ]
+            for pattern in format_patterns:
+                think_content = re.sub(pattern, '', think_content, flags=re.IGNORECASE | re.DOTALL)
+                response_content = re.sub(pattern, '', response_content, flags=re.IGNORECASE | re.DOTALL)
+            
+            # Clean the contents
+            think_content = self._clean_content(think_content)[:500]
+            response_content = self._clean_content(response_content)
+            
+            # Remove any duplicated sentences in response
+            response_sentences = re.split(r'(?<=[.!?])\s+', response_content)
+            unique_sentences = []
+            for sentence in response_sentences:
+                if sentence and not any(self._check_content_similarity(sentence, existing) for existing in unique_sentences):
+                    unique_sentences.append(sentence)
+            response_content = ' '.join(unique_sentences)
+            
+            # Ensure content is meaningful
+            if not think_content or think_content.lower() in ['', 'hello']:
+                think_content = "Processing and analyzing your message"
+            if not response_content:
+                response_content = "I'm here to help. Could you please rephrase your question?"
                 
-            if re.match(r'^\d+\.|\*|\-', section):
-                main_content.append(section)
-            elif not intro_section and len(section.split()) < 30:
-                intro_section = section
-            elif intro_section and main_content:
-                if conclusion:
-                    conclusion += "\n\n" + section
-                else:
-                    conclusion = section
+        else:
+            # No proper tags found - create formatted response from raw text
+            text = re.sub(r'</think>\s*\[.*?\]', '', text)
+            text = re.sub(r'\[.*?\]', '', text)
+            text = text.strip()
+            
+            # Split into sentences
+            sentences = re.split(r'(?<=[.!?])\s+', text)
+            
+            if len(sentences) > 1:
+                think_content = self._clean_content(sentences[0])[:500]
+                response_content = self._clean_content(' '.join(sentences[1:]))
             else:
-                main_content.append(section)
+                think_content = "Analyzing your input"
+                response_content = self._clean_content(text)
         
-        # Format think content
-        think_content = (intro_section or 
-                        (main_content[0] if main_content else 
-                         "Processing user request"))
-        
-        # Format response content
-        response_parts = []
-        if intro_section:
-            response_parts.append(intro_section)
-        response_parts.extend(main_content)
-        if conclusion:
-            response_parts.append(conclusion)
-        
-        response_content = "\n\n".join(response_parts)
-        
-        # Clean the contents
-        think_content = self._clean_content(think_content)
-        response_content = self._clean_content(response_content)
-        
-        # Ensure contents are not too similar
-        if self._check_content_similarity(think_content, response_content):
-            think_content = "Providing detailed information about the user's request"
+        # Ensure they're different
+        if think_content == response_content:
+            think_content = "Processing your question"
         
         # Format with proper tags
         formatted = f"""<think>
@@ -658,58 +669,14 @@ class TTSManager:
             # Check if running in WSL
             self.is_wsl = os.path.exists("/proc/version") and "microsoft" in open("/proc/version").read().lower()
             
+            # Store the selected voice ID for consistent use
+            self.selected_voice_id = None
+            
             if not self.is_wsl:
-                # Windows or other systems: use pyttsx3 as before
-                import pyttsx3
-                self.engine = pyttsx3.init()
-                
-                # Configure the engine for better quality
-                self.engine.setProperty('rate', 175)     # Slightly faster speed
-                self.engine.setProperty('volume', 1.0)   # Full volume
-                
-                # Get available voices
-                voices = self.engine.getProperty('voices')
-                print("\n[TTS] Available voices:")
-                selected_voice = None
-                
-                # Find a suitable voice
-                for voice in voices:
-                    # Print voice info
-                    print(f"  - ID: {voice.id}")
-                    print(f"    Name: {voice.name}")
-                    if hasattr(voice, 'languages'):
-                        print(f"    Languages: {voice.languages}")
-                    if hasattr(voice, 'gender'):
-                        print(f"    Gender: {voice.gender}")
-                    if hasattr(voice, 'age'):
-                        print(f"    Age: {voice.age}")
-                    print("")
-                    
-                    voice_name = voice.name.lower() if voice.name else ""
-                    
-                    # First priority: Microsoft Zira
-                    if "zira" in voice_name:
-                        selected_voice = voice
-                        break
-                        
-                    # Second priority: Any female voice or voice with female indicators in name
-                    if not selected_voice and any(name in voice_name for name in 
-                        ['female', 'woman', 'girl', 'zira', 'hazel', 'helen', 'eva']):
-                        selected_voice = voice
-                        
-                    # Third priority: First English voice
-                    if not selected_voice and "english" in voice_name:
-                        selected_voice = voice
-                
-                # If no specific voice found, use the first available voice
-                if not selected_voice and voices:
-                    selected_voice = voices[0]
-                
-                if selected_voice:
-                    self.engine.setProperty('voice', selected_voice.id)
-                    print(f"[TTS] Selected voice: {selected_voice.name}")
-                else:
-                    print("[WARN] No voices found in the system")
+                # Windows: Don't create engine in init to avoid hanging
+                # Engine will be created on first synthesis
+                self._synthesis_count = 0
+                print("[TTS] TTS Manager initialized (engine created on demand)")
             else:
                 # In WSL: prepare for PowerShell TTS
                 print("[TTS] Running in WSL, will use Windows TTS")
@@ -770,7 +737,14 @@ class TTSManager:
                 ps_script = f'''
                 Add-Type -AssemblyName System.Speech
                 $synthesizer = New-Object System.Speech.Synthesis.SpeechSynthesizer
-                $synthesizer.SelectVoiceByHints('Female')
+                # Try to select a female voice explicitly
+                $voices = $synthesizer.GetInstalledVoices()
+                $femaleVoice = $voices | Where-Object {{ $_.VoiceInfo.Gender -eq 'Female' }} | Select-Object -First 1
+                if ($femaleVoice) {{
+                    $synthesizer.SelectVoice($femaleVoice.VoiceInfo.Name)
+                }} else {{
+                    $synthesizer.SelectVoiceByHints('Female')
+                }}
                 $synthesizer.SetOutputToWaveFile("{wsl_path}")
                 $synthesizer.Speak("{tts_text.replace('"', '`"')}")
                 $synthesizer.Dispose()
@@ -791,8 +765,65 @@ class TTSManager:
                 time.sleep(0.5)
             else:
                 # Use pyttsx3 for Windows and other systems
-                self.engine.save_to_file(tts_text, temp_filename)
-                self.engine.runAndWait()
+                import pyttsx3
+                
+                # Track synthesis count
+                if not hasattr(self, '_synthesis_count'):
+                    self._synthesis_count = 0
+                self._synthesis_count += 1
+                
+                # Create fresh engine for EVERY synthesis to ensure consistency
+                try:
+                    # Clean up old engine if exists
+                    if hasattr(self, 'engine'):
+                        try:
+                            self.engine.stop()
+                            del self.engine
+                        except:
+                            pass
+                    
+                    # Create new engine
+                    self.engine = pyttsx3.init()
+                    self.engine.setProperty('rate', 180)
+                    self.engine.setProperty('volume', 1.0)
+                    
+                    # Find and set female voice
+                    if not self.selected_voice_id:
+                        voices = self.engine.getProperty('voices')
+                        for voice in voices:
+                            if voice.name and 'zira' in voice.name.lower():
+                                self.selected_voice_id = voice.id
+                                print(f"[TTS] Female voice found: {voice.name}")
+                                break
+                        
+                        if not self.selected_voice_id:
+                            for voice in voices:
+                                name = (voice.name or '').lower()
+                                if any(f in name for f in ['female', 'hedda', 'helena']):
+                                    self.selected_voice_id = voice.id
+                                    print(f"[TTS] Alternative female voice: {voice.name}")
+                                    break
+                    
+                    # Set the female voice
+                    if self.selected_voice_id:
+                        self.engine.setProperty('voice', self.selected_voice_id)
+                    
+                    
+                    # Generate speech to file
+                    self.engine.save_to_file(tts_text, temp_filename)
+                    self.engine.runAndWait()
+                    
+                except Exception as e:
+                    print(f"[ERROR] TTS engine error: {str(e)}")
+                    # Fallback: try with a new engine
+                    try:
+                        emergency_engine = pyttsx3.init()
+                        if self.selected_voice_id:
+                            emergency_engine.setProperty('voice', self.selected_voice_id)
+                        emergency_engine.save_to_file(tts_text, temp_filename)
+                        emergency_engine.runAndWait()
+                    except:
+                        raise
             
             # Read the generated audio file
             from scipy.io import wavfile
@@ -867,7 +898,7 @@ class VoiceSystem:
             
             logger.info("\nSystem Status:")
             for component, is_ready in status.items():
-                logger.info(f"{component}: {'✓' if is_ready else '✗'}")
+                logger.info(f"{component}: {'OK' if is_ready else 'FAIL'}")
             
             return all(status.values())
             
